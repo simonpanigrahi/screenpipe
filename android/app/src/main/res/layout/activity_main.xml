@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A SurfaceView fills the screen — MediaCodec decodes directly onto its Surface
+  (zero-copy, low latency). A TextView on top shows connection status until the
+  first frame arrives.
+
+  NOTE: the SurfaceView is match_parent, so the video is currently STRETCHED to
+  fill. Correct aspect-fit/letterboxing is Milestone 2.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <SurfaceView
+        android:id="@+id/surface"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <TextView
+        android:id="@+id/status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="Waiting for stream…"
+        android:textColor="@android:color/white"
+        android:textSize="20sp" />
+</FrameLayout>
