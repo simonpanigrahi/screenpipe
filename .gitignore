@@ -19,6 +19,3 @@ __pycache__/
 
 # Environment
 .env
-
-# OS / editor
-.DS_Store

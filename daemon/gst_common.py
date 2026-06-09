@@ -48,12 +48,15 @@ PORT = 5000           # TCP port; the Android app reaches it via `adb reverse`.
 # ---------------------------------------------------------------------------
 _ENCODER_CANDIDATES = [
     # Intel low-power VA encoder — usually the lowest latency on Intel iGPUs.
+    # rate-control=cbr is REQUIRED: the `va` plugin defaults to cqp (constant-QP)
+    # and otherwise ignores the bitrate target, giving variable bitrate — which
+    # breaks the CBR 30–60 Mbps standard and the latency budget over USB.
     ("vah264lpenc",
-     "vah264lpenc bitrate={kbps} ref-frames=1 b-frames=0 key-int-max={gop}"),
+     "vah264lpenc rate-control=cbr bitrate={kbps} ref-frames=1 b-frames=0 key-int-max={gop}"),
 
     # Generic VA-API encoder (Intel/AMD), GStreamer >= 1.22.
     ("vah264enc",
-     "vah264enc bitrate={kbps} ref-frames=1 b-frames=0 key-int-max={gop}"),
+     "vah264enc rate-control=cbr bitrate={kbps} ref-frames=1 b-frames=0 key-int-max={gop}"),
 
     # Older VA-API element (Intel/AMD), GStreamer < 1.22.
     ("vaapih264enc",

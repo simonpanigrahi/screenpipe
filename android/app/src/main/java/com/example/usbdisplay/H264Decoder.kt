@@ -116,6 +116,15 @@ class H264Decoder(
 
                 val input = c.getInputBuffer(index) ?: continue
                 input.clear()
+                if (nal.size > input.capacity()) {
+                    // A NAL larger than the codec's input buffer would throw
+                    // BufferOverflowException (a RuntimeException not caught below)
+                    // and silently kill this thread. Recycle the buffer empty and
+                    // drop the NAL; the next keyframe recovers the stream.
+                    Log.w(TAG, "NAL ${nal.size}B exceeds input buffer ${input.capacity()}B; dropping")
+                    c.queueInputBuffer(index, 0, 0, 0, 0)
+                    continue
+                }
                 input.put(nal)
 
                 val flags = if (isParameterSet(nal)) {
@@ -153,6 +162,9 @@ class H264Decoder(
     fun stop() {
         running = false
         feeder?.interrupt()
+        // Join the feeder BEFORE releasing the codec, otherwise it can call
+        // getInputBuffer/queueInputBuffer on a released codec (use-after-release).
+        try { feeder?.join(500) } catch (_: InterruptedException) {}
         feeder = null
         try {
             codec?.stop()
