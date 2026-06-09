@@ -16,29 +16,29 @@ Run:
     python3 test_sender.py
 """
 
-import gi
-gi.require_version("Gst", "1.0")
-from gi.repository import Gst  # noqa: E402
+import gi                                  # PyGObject bridge (same as in gst_common) so we can talk to GStreamer
+gi.require_version("Gst", "1.0")           # pin GStreamer to the 1.0 API before importing it
+from gi.repository import Gst              # noqa: E402  -> the GStreamer module itself (imported but mostly used via gst_common here)
 
-import gst_common
+import gst_common                          # our shared helpers: init, encoder picking, the encode tail, and the run loop
 
 
-def main():
-    gst_common.init_gst()
+def main():                                # program entry point
+    gst_common.init_gst()                  # initialise GStreamer once (must happen before building any pipeline)
 
     # Source: a bouncing ball (motion lets you judge latency/smoothness) with a
     # running clock overlay. `is-live=true` makes it behave like a real capture.
-    source = (
-        "videotestsrc is-live=true pattern=ball ! "
-        f"video/x-raw,width={gst_common.WIDTH},height={gst_common.HEIGHT},"
-        f"framerate={gst_common.FPS}/1 ! "
-        "timeoverlay halignment=right valignment=bottom font-desc=\"Sans 36\" ! "
+    source = (                                                                 # build the UPSTREAM half (the fake video source) as a string
+        "videotestsrc is-live=true pattern=ball ! "                            # generate test video; pattern=ball is a moving ball; is-live=true mimics a real camera/screen timing
+        f"video/x-raw,width={gst_common.WIDTH},height={gst_common.HEIGHT},"    # capsfilter: ask the source for our target resolution...
+        f"framerate={gst_common.FPS}/1 ! "                                     # ...and our target framerate
+        "timeoverlay halignment=right valignment=bottom font-desc=\"Sans 36\" ! "  # burn a running clock into the bottom-right corner — used to measure latency on camera
     )
 
     # Source feeds straight into the shared encode/serve tail.
-    pipeline = source + gst_common.build_encode_tail()
-    gst_common.run_pipeline(pipeline)
+    pipeline = source + gst_common.build_encode_tail()   # glue the fake source onto the SAME encode->TCP tail the real daemon uses
+    gst_common.run_pipeline(pipeline)                    # parse, start, and block on the pipeline until Ctrl-C / error / EOS
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":                 # only run main() when executed directly (not when imported as a module)
     main()

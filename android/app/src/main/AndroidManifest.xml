@@ -1,21 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- The manifest is the app's "table of contents": it declares permissions,
+     the app's components (activities/services), and how the OS launches them.
+     (XML can't carry comments between attributes, so each attribute is explained
+     in the comment block above its element.) -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Needed for the TCP socket, even though it connects to localhost
          (the adb-reverse tunnel). -->
+    <!-- uses-permission: requests a capability from the OS.
+         android:name=...INTERNET -> permission to open network sockets. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- <application>: app-wide settings; every component lives inside it.
+         android:allowBackup="true"  -> let Android back up the app's data.
+         android:label="USB Display" -> the app name shown in the launcher.
+         android:supportsRtl="true"  -> support right-to-left layouts.
+         android:theme=...           -> the default visual theme (defined in themes.xml). -->
     <application
         android:allowBackup="true"
         android:label="USB Display"
         android:supportsRtl="true"
         android:theme="@style/Theme.UsbDisplay">
 
+        <!-- <activity>: one screen of the app (here, the only one).
+             android:name=".MainActivity" -> the class, relative to the package.
+             android:exported="true"      -> the OS may launch it (required for the launcher entry).
+             android:configChanges=...    -> handle these changes ourselves WITHOUT restarting the activity
+                                             (so rotation/resize doesn't destroy our surface + stream).
+             android:screenOrientation="landscape" -> lock to landscape (a tablet monitor is landscape). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout"
             android:screenOrientation="landscape">
+            <!-- <intent-filter>: declares HOW this activity can be started.
+                 The MAIN action + LAUNCHER category together mean:
+                 "this is the entry point; show an icon in the app launcher." -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

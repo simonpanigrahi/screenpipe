@@ -6,17 +6,34 @@
 
   NOTE: the SurfaceView is match_parent, so the video is currently STRETCHED to
   fill. Correct aspect-fit/letterboxing is Milestone 2.
+
+  (Attributes are explained in the comment block above each element, since XML
+  can't hold comments between attributes.)
 -->
+<!-- FrameLayout: a simple container that STACKS its children on top of each
+     other (later children draw above earlier ones). Here: video on the bottom,
+     status text on top.
+       layout_width/height="match_parent" -> fill the whole screen.
+       background=black                    -> black behind any letterbox bars. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@android:color/black">
 
+    <!-- SurfaceView: the dedicated video surface the decoder renders onto.
+           id="@+id/surface" -> the id MainActivity looks up via findViewById.
+           width/height match_parent -> fills the FrameLayout (hence stretched for now). -->
     <SurfaceView
         android:id="@+id/surface"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- TextView: the status overlay ("Waiting for stream…").
+           id="@+id/status"          -> looked up by MainActivity to update/hide it.
+           width/height wrap_content  -> only as big as its text.
+           layout_gravity="center"    -> centered within the FrameLayout.
+           text=...                   -> the initial message before connecting.
+           textColor=white / textSize=20sp -> visible on the black background. -->
     <TextView
         android:id="@+id/status"
         android:layout_width="wrap_content"

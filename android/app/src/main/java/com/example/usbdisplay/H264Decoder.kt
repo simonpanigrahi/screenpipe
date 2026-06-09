@@ -1,11 +1,11 @@
-package com.example.usbdisplay
+package com.example.usbdisplay                 // same app package
 
-import android.media.MediaCodec
-import android.media.MediaFormat
-import android.os.Build
-import android.util.Log
-import android.view.Surface
-import java.util.concurrent.LinkedBlockingQueue
+import android.media.MediaCodec                 // Android's low-level hardware codec API (we use it as an H.264 DECODER)
+import android.media.MediaFormat                // describes the video format (mime, width, height, flags) we hand the codec
+import android.os.Build                         // lets us check the device's Android version at runtime
+import android.util.Log                         // logcat logging
+import android.view.Surface                     // the on-screen surface the decoder draws decoded frames onto
+import java.util.concurrent.LinkedBlockingQueue // a thread-safe FIFO queue used to pass work between threads
 
 /**
  * Wraps a hardware H.264 (AVC) decoder. Decoded frames are rendered DIRECTLY onto
@@ -26,120 +26,120 @@ import java.util.concurrent.LinkedBlockingQueue
  * NOTE: feeding NAL-by-NAL is the simple Phase-1 approach and works on Android's
  * AVC decoders. Milestone 3 switches to length-prefixed access units.
  */
-class H264Decoder(
-    private val surface: Surface,
-    private val onStatus: (String) -> Unit
+class H264Decoder(                              // constructor params -> private fields:
+    private val surface: Surface,               // where decoded frames are rendered (from the SurfaceView)
+    private val onStatus: (String) -> Unit       // callback to report status to the UI
 ) {
-    companion object {
-        private const val TAG = "H264Decoder"
-        private const val MIME = MediaFormat.MIMETYPE_VIDEO_AVC // "video/avc"
+    companion object {                          // shared constants ("static")
+        private const val TAG = "H264Decoder"   // logcat tag
+        private const val MIME = MediaFormat.MIMETYPE_VIDEO_AVC // "video/avc" = H.264; tells the system which decoder to load
         // Nominal configure size. The decoder reads the true dimensions from the
         // stream's SPS, so this only needs to be a sane placeholder. It matches the
         // resolution the Linux side forces (1920x1200).
-        private const val NOMINAL_WIDTH = 1920
-        private const val NOMINAL_HEIGHT = 1200
+        private const val NOMINAL_WIDTH = 1920  // placeholder width used only until the real size arrives in the SPS
+        private const val NOMINAL_HEIGHT = 1200 // placeholder height (same reason)
     }
 
-    private var codec: MediaCodec? = null
-    @Volatile private var running = false
+    private var codec: MediaCodec? = null       // the actual decoder instance; null until start()
+    @Volatile private var running = false       // on/off switch, read by the feeder thread (@Volatile = cross-thread safe)
 
-    private val pendingNals = LinkedBlockingQueue<ByteArray>()
-    private val availableInputBuffers = LinkedBlockingQueue<Int>()
-    private var feeder: Thread? = null
+    private val pendingNals = LinkedBlockingQueue<ByteArray>()       // NALs waiting to be fed in (produced by StreamClient, consumed by the feeder)
+    private val availableInputBuffers = LinkedBlockingQueue<Int>()   // indices of empty input buffers the codec gave us (produced by the codec callback)
+    private var feeder: Thread? = null          // the thread that marries NALs to free buffers and submits them
 
     /** Start the decoder and begin rendering to the surface. */
     fun start() {
-        val format = MediaFormat.createVideoFormat(MIME, NOMINAL_WIDTH, NOMINAL_HEIGHT)
+        val format = MediaFormat.createVideoFormat(MIME, NOMINAL_WIDTH, NOMINAL_HEIGHT)   // describe the stream: H.264 at the placeholder size
 
         // Ask the decoder for low-latency mode (skip frame reordering buffers).
         // KEY_LOW_LATENCY is API 30+. The Tab S9+ is far above this.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {   // R = Android 11 (API 30); only set the flag if supported
+            format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)   // 1 = enable low-latency decode (no output reordering buffer = less delay)
         }
 
-        val c = MediaCodec.createDecoderByType(MIME)
+        val c = MediaCodec.createDecoderByType(MIME)   // create a decoder that can handle "video/avc"
 
         // Async callbacks — must be set BEFORE configure().
-        c.setCallback(object : MediaCodec.Callback() {
-            override fun onInputBufferAvailable(mc: MediaCodec, index: Int) {
+        c.setCallback(object : MediaCodec.Callback() {   // register callbacks so the codec PUSHES events to us (async mode) instead of us polling
+            override fun onInputBufferAvailable(mc: MediaCodec, index: Int) {   // codec: "I have an empty input slot #index, give me data"
                 // The codec is ready for more input; hand the index to the feeder.
-                availableInputBuffers.offer(index)
+                availableInputBuffers.offer(index)   // queue the index for the feeder thread to use
             }
 
-            override fun onOutputBufferAvailable(
+            override fun onOutputBufferAvailable(   // codec: "decoded frame #index is ready"
                 mc: MediaCodec, index: Int, info: MediaCodec.BufferInfo
             ) {
                 // render=true draws the frame onto the Surface immediately.
                 try {
-                    mc.releaseOutputBuffer(index, true)
-                } catch (e: IllegalStateException) {
+                    mc.releaseOutputBuffer(index, true)   // release the output buffer with render=true -> the frame is drawn to the Surface (zero-copy)
+                } catch (e: IllegalStateException) {      // can happen if the codec was torn down mid-callback
                     Log.w(TAG, "releaseOutputBuffer failed", e)
                 }
             }
 
-            override fun onOutputFormatChanged(mc: MediaCodec, format: MediaFormat) {
-                val w = format.getInteger(MediaFormat.KEY_WIDTH)
-                val h = format.getInteger(MediaFormat.KEY_HEIGHT)
+            override fun onOutputFormatChanged(mc: MediaCodec, format: MediaFormat) {   // fires once the decoder learns the REAL dimensions from the SPS
+                val w = format.getInteger(MediaFormat.KEY_WIDTH)    // actual decoded width
+                val h = format.getInteger(MediaFormat.KEY_HEIGHT)   // actual decoded height
                 Log.i(TAG, "decoding ${w}x$h")
-                onStatus("") // clear the status overlay once frames flow
+                onStatus("") // clear the status overlay once frames flow   // empty string -> MainActivity hides the "Waiting…" label
             }
 
-            override fun onError(mc: MediaCodec, e: MediaCodec.CodecException) {
+            override fun onError(mc: MediaCodec, e: MediaCodec.CodecException) {   // the codec hit a fatal error
                 Log.e(TAG, "codec error", e)
-                onStatus("decoder error: ${e.message}")
+                onStatus("decoder error: ${e.message}")   // surface it to the UI
             }
         })
 
         // null crypto, flags=0 (decoder). Render target is our Surface.
-        c.configure(format, surface, null, 0)
-        c.start()
-        codec = c
-        running = true
+        c.configure(format, surface, null, 0)   // configure the codec: format, render onto `surface`, no encryption (null), flags 0 = decoder
+        c.start()                               // start it -> the codec begins handing us empty input buffers via the callback
+        codec = c                               // store the instance
+        running = true                          // arm the feeder loop
 
-        feeder = Thread({ feedLoop() }, "h264-feeder").apply { start() }
+        feeder = Thread({ feedLoop() }, "h264-feeder").apply { start() }   // spawn the feeder thread that submits NALs into the codec
         Log.i(TAG, "decoder started")
     }
 
     /** Called by the network thread for each NAL unit (includes the start code). */
-    fun submitNal(nal: ByteArray) {
-        if (running) pendingNals.offer(nal)
+    fun submitNal(nal: ByteArray) {             // StreamClient calls this for every complete NAL it parses
+        if (running) pendingNals.offer(nal)     // if we're active, queue the NAL for the feeder (offer never blocks)
     }
 
-    private fun feedLoop() {
-        val c = codec ?: return
-        var ptsUs = 0L
+    private fun feedLoop() {                     // runs on the feeder thread: pull a NAL + a free buffer, submit to the codec
+        val c = codec ?: return                 // grab the codec; bail if somehow null
+        var ptsUs = 0L                           // a fake, monotonically increasing presentation timestamp (microseconds)
         try {
-            while (running) {
+            while (running) {                    // loop until stop()
                 // Block until we have both a NAL and a free input buffer.
-                val nal = pendingNals.take()
-                val index = availableInputBuffers.take()
+                val nal = pendingNals.take()     // BLOCK until a NAL is available (from submitNal)
+                val index = availableInputBuffers.take()   // BLOCK until the codec offers a free input buffer
 
-                val input = c.getInputBuffer(index) ?: continue
-                input.clear()
-                if (nal.size > input.capacity()) {
+                val input = c.getInputBuffer(index) ?: continue   // get the actual ByteBuffer for that slot; skip if null
+                input.clear()                    // reset the buffer's position/limit so we can write from the start
+                if (nal.size > input.capacity()) {   // does the NAL fit in the codec's input buffer?
                     // A NAL larger than the codec's input buffer would throw
                     // BufferOverflowException (a RuntimeException not caught below)
                     // and silently kill this thread. Recycle the buffer empty and
                     // drop the NAL; the next keyframe recovers the stream.
                     Log.w(TAG, "NAL ${nal.size}B exceeds input buffer ${input.capacity()}B; dropping")
-                    c.queueInputBuffer(index, 0, 0, 0, 0)
-                    continue
+                    c.queueInputBuffer(index, 0, 0, 0, 0)   // submit an EMPTY buffer to recycle the slot (otherwise the index is leaked)
+                    continue                     // skip this oversized NAL and move on
                 }
-                input.put(nal)
+                input.put(nal)                   // copy the NAL bytes into the codec's input buffer
 
-                val flags = if (isParameterSet(nal)) {
-                    MediaCodec.BUFFER_FLAG_CODEC_CONFIG
+                val flags = if (isParameterSet(nal)) {   // is this NAL an SPS/PPS header rather than picture data?
+                    MediaCodec.BUFFER_FLAG_CODEC_CONFIG   // yes -> mark it as codec-config so the decoder configures itself from it
                 } else {
-                    0
+                    0                            // no -> normal frame data, no special flag
                 }
                 // Monotonic, increasing timestamps keep the decoder happy; exact
                 // values don't matter because we render on arrival.
-                ptsUs += 1000L
-                c.queueInputBuffer(index, 0, nal.size, ptsUs, flags)
+                ptsUs += 1000L                   // bump the fake timestamp by 1000 µs each NAL (just needs to keep increasing)
+                c.queueInputBuffer(index, 0, nal.size, ptsUs, flags)   // hand the filled buffer back to the codec: offset 0, length nal.size, timestamp, flags
             }
-        } catch (_: InterruptedException) {
+        } catch (_: InterruptedException) {      // thrown by take() when stop() interrupts us
             // normal on stop()
-        } catch (e: IllegalStateException) {
+        } catch (e: IllegalStateException) {     // thrown if the codec was torn down while we were mid-call
             Log.w(TAG, "feed loop ended", e)
         }
     }
@@ -147,33 +147,33 @@ class H264Decoder(
     /** True if this NAL unit is an SPS (7) or PPS (8) parameter set. */
     private fun isParameterSet(nal: ByteArray): Boolean {
         // Skip the Annex-B start code to reach the NAL header byte.
-        val headerIndex = when {
+        val headerIndex = when {                 // figure out how long the leading start code is, so we can find the NAL header byte after it
             nal.size >= 4 && nal[0].toInt() == 0 && nal[1].toInt() == 0 &&
-                nal[2].toInt() == 0 && nal[3].toInt() == 1 -> 4   // 00 00 00 01
+                nal[2].toInt() == 0 && nal[3].toInt() == 1 -> 4   // 4-byte start code 00 00 00 01 -> header is at index 4
             nal.size >= 3 && nal[0].toInt() == 0 && nal[1].toInt() == 0 &&
-                nal[2].toInt() == 1 -> 3                          // 00 00 01
-            else -> return false
+                nal[2].toInt() == 1 -> 3                          // 3-byte start code 00 00 01 -> header is at index 3
+            else -> return false                 // no recognisable start code -> definitely not a parameter set
         }
-        if (headerIndex >= nal.size) return false
-        val type = nal[headerIndex].toInt() and 0x1F
-        return type == 7 || type == 8
+        if (headerIndex >= nal.size) return false   // guard: the NAL is just a start code with no header byte
+        val type = nal[headerIndex].toInt() and 0x1F   // the low 5 bits of the NAL header byte = the NAL unit type
+        return type == 7 || type == 8            // type 7 = SPS, type 8 = PPS -> these are the parameter sets
     }
 
-    fun stop() {
-        running = false
-        feeder?.interrupt()
+    fun stop() {                                 // shut the decoder down cleanly
+        running = false                          // stop the feeder loop
+        feeder?.interrupt()                      // wake the feeder if it's blocked in take()
         // Join the feeder BEFORE releasing the codec, otherwise it can call
         // getInputBuffer/queueInputBuffer on a released codec (use-after-release).
-        try { feeder?.join(500) } catch (_: InterruptedException) {}
-        feeder = null
+        try { feeder?.join(500) } catch (_: InterruptedException) {}   // wait up to 500 ms for the feeder thread to actually exit
+        feeder = null                            // drop the reference
         try {
-            codec?.stop()
+            codec?.stop()                        // stop the codec (may throw if already in a bad state)
         } catch (_: IllegalStateException) {
         }
-        codec?.release()
-        codec = null
-        pendingNals.clear()
-        availableInputBuffers.clear()
+        codec?.release()                         // free the codec's hardware resources
+        codec = null                             // drop the reference
+        pendingNals.clear()                      // discard any queued NALs
+        availableInputBuffers.clear()            // discard any queued buffer indices
         Log.i(TAG, "decoder stopped")
     }
 }
