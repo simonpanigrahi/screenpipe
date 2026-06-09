@@ -30,28 +30,35 @@ back-channel, the Android service, and one-command packaging.
 ## What's in here
 
 ```
-usb-display/
+screenpipe/
 ├── README.md                     <- you are here
-├── linux/
-│   ├── INSTALL.md                <- system + python dependencies
+├── LICENSE
+├── daemon/
+│   ├── SETUP.md                  <- system dependencies (apt packages)
+│   ├── requirements.txt          <- apt package reference (not pip)
 │   ├── gst_common.py             <- shared: GStreamer init, encoder auto-detect, pipeline runner
 │   ├── test_sender.py            <- STEP 1: sends a moving test pattern (NO Wayland needed)
 │   ├── virtual_display_daemon.py <- STEP 2: the real thing — RecordVirtual virtual monitor
 │   └── run_adb_reverse.sh        <- sets up the USB tunnel
-└── android/                      <- open this folder in Android Studio
-    ├── settings.gradle.kts
-    ├── build.gradle.kts
-    ├── gradle.properties
-    └── app/
-        ├── build.gradle.kts
-        └── src/main/
-            ├── AndroidManifest.xml
-            ├── res/layout/activity_main.xml
-            ├── res/values/themes.xml
-            └── java/com/example/usbdisplay/
-                ├── MainActivity.kt   <- fullscreen surface, lifecycle
-                ├── StreamClient.kt   <- TCP read + Annex-B NAL splitting
-                └── H264Decoder.kt    <- MediaCodec hardware decode -> Surface
+├── android/                      <- open this folder in Android Studio
+│   ├── settings.gradle.kts
+│   ├── build.gradle.kts
+│   ├── gradle.properties
+│   └── app/
+│       ├── build.gradle.kts
+│       └── src/main/
+│           ├── AndroidManifest.xml
+│           ├── res/layout/activity_main.xml
+│           ├── res/values/themes.xml
+│           └── java/com/example/usbdisplay/
+│               ├── MainActivity.kt   <- fullscreen surface, lifecycle
+│               ├── StreamClient.kt   <- TCP read + Annex-B NAL splitting
+│               └── H264Decoder.kt    <- MediaCodec hardware decode -> Surface
+├── docs/
+│   ├── ROADMAP.md                <- M0–M7 milestone plan
+│   └── STANDARDS.md              <- latency / quality targets
+└── protocol/
+    └── PROTOCOL.md               <- wire-format spec (Milestone 3 placeholder)
 ```
 
 ## Run order (do these in sequence)
@@ -65,7 +72,7 @@ Open `android/` in Android Studio, let it sync, run on the tablet. The app shows
 
 ### 2. Open the USB tunnel
 ```bash
-cd linux
+cd daemon
 ./run_adb_reverse.sh          # maps tablet localhost:5000 -> laptop localhost:5000
 ```
 
@@ -102,7 +109,7 @@ downstream is wasted effort until this gate passes.
 
 - **Encoder chosen?** Each script prints which H.264 encoder it picked. If it fell
   back to `x264enc` (software), you're missing hardware encode — install the VA-API
-  / NVENC GStreamer plugins (see INSTALL.md). Software encode adds latency + CPU.
+  / NVENC GStreamer plugins (see `daemon/SETUP.md`). Software encode adds latency + CPU.
 - **Encoder property errors** (e.g. "no property named ...") — element properties
   differ across GStreamer versions. Run `gst-inspect-1.0 <encoder-name>` and adjust
   the strings in `gst_common.py`. This is expected and called out in comments.
