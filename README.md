@@ -126,9 +126,13 @@ downstream is wasted effort until this gate passes.
 
 ## Honest caveats
 
-- This scaffold has **not** been compiled/run in your environment — it's correct,
-  idiomatic code, but expect to fix small version-specific things (GStreamer
-  element props, Gradle/AGP versions Android Studio wants to bump). That's normal.
+- The daemon's Python compiles cleanly and the GStreamer pipeline string
+  parse-validates locally (confirmed with the `x264enc` software fallback). The
+  **hardware**-encoder fragments (VA-API / NVENC) and the GNOME `RecordVirtual`
+  D-Bus call are version-sensitive and are *not* validated here — expect to fix
+  small version-specific things (GStreamer element props, the GNOME ScreenCast
+  signature, Gradle/AGP versions Android Studio wants to bump). That's normal and
+  the comments call out where.
 - The proof renders the surface **stretched** to the SurfaceView. Correct
   aspect-fit + DPI scaling is Milestone 2 (comments mark where).
 - The transport is a raw byte stream split by NAL start codes. Milestone 3 replaces

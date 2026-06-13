@@ -1,34 +1,39 @@
 # System dependencies — NOT a pip requirements file.
 # GStreamer and its Python bindings must be installed via apt, not pip.
-# Run the commands below on Ubuntu 24.04 (GNOME / Wayland).
+# Tested on Ubuntu 24.04 (GNOME / Wayland).
 #
-# Usage:
+# Usage — install the CORE packages listed below in one shot:
 #   sudo apt update
 #   sudo apt install -y $(grep -v '^#' requirements.txt | grep -v '^$' | tr '\n' ' ')
 #
-# (Each line below is an apt package name, commented for documentation.)
+# The lines that are NOT comments are real apt package names, so the command
+# above expands to exactly the core dependency list. The hardware-encoder
+# plugins are GPU-specific (you install the ONE matching your GPU), so they are
+# intentionally left commented at the bottom — see SETUP.md for which to pick.
 
 # ── Python + GObject / D-Bus bindings ────────────────────────────────────────
-# python3
-# python3-gi
-# python3-pydbus
-# gir1.2-gtk-3.0
+python3
+python3-gi
+python3-pydbus
+gir1.2-gtk-3.0
 
 # ── GStreamer core + plugins ──────────────────────────────────────────────────
-# gstreamer1.0-tools
-# gstreamer1.0-plugins-base
-# gstreamer1.0-plugins-good
-# gstreamer1.0-plugins-bad
-# gstreamer1.0-plugins-ugly
-# gstreamer1.0-pipewire
-# gstreamer1.0-libav
+gstreamer1.0-tools
+gstreamer1.0-plugins-base
+gstreamer1.0-plugins-good
+gstreamer1.0-plugins-bad
+gstreamer1.0-plugins-ugly
+gstreamer1.0-pipewire
+gstreamer1.0-libav
 
-# ── Hardware encoder plugins (install the one that matches your GPU) ──────────
+# ── ADB (USB tunnel) ─────────────────────────────────────────────────────────
+adb
+
+# ── Hardware encoder plugins — pick the ONE matching your GPU (see SETUP.md) ──
+# Install these manually; they are commented so the one-liner above does not
+# pull a VA-API stack onto an NVIDIA box (or vice versa).
 # Intel / AMD (VA-API):
 #   gstreamer1.0-vaapi
 #   va-driver-all
-# NVIDIA (NVENC) — needs proprietary driver; nvh264enc ships in plugins-bad
+# NVIDIA (NVENC) — needs the proprietary driver; nvh264enc ships in plugins-bad
 #   (no extra apt package; ensure the proprietary driver is installed first)
-
-# ── ADB (USB tunnel) ─────────────────────────────────────────────────────────
-# adb
