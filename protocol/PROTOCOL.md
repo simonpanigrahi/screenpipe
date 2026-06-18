@@ -10,4 +10,4 @@ protocol: length-prefixed access units (4-byte big-endian payload length
 preceding each AU), a versioned handshake exchanged at connection setup, and a
 multiplexed control channel carrying display-configuration commands and — once
 Milestone 5 lands — touch/input events back to the host.  Full wire-format
-tables, state-machine diagrams, and version-negotiation rules will live here.
+tables, state-machine diagrams, and version-negotiation rules will live here .
