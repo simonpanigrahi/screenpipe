@@ -8,7 +8,7 @@ to be worth building the full product?**
 It is intentionally hardcoded and ugly in places. Do **not** mistake it for the
 finished package. Once latency is proven, the roadmap's later milestones add the
 real virtual-display sizing/scaling, a proper framed protocol, the touch
-back-channel, the Android service, and one-command packaging.
+back-channel, the Android service, and one-command packaging .
 
 ```
 ┌─────────────────────────── LINUX (laptop) ───────────────────────────┐
