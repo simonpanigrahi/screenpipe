@@ -43,6 +43,7 @@ class H264Decoder(                              // constructor params -> private
 
     private var codec: MediaCodec? = null       // the actual decoder instance; null until start()
     @Volatile private var running = false       // on/off switch, read by the feeder thread (@Volatile = cross-thread safe)
+    private var sawConfig = false               // have we fed the decoder its first SPS yet? (gates picture data until configured)
 
     private val pendingNals = LinkedBlockingQueue<ByteArray>()       // NALs waiting to be fed in (produced by StreamClient, consumed by the feeder)
     private val availableInputBuffers = LinkedBlockingQueue<Int>()   // indices of empty input buffers the codec gave us (produced by the codec callback)
@@ -96,6 +97,7 @@ class H264Decoder(                              // constructor params -> private
         c.configure(format, surface, null, 0)   // configure the codec: format, render onto `surface`, no encryption (null), flags 0 = decoder
         c.start()                               // start it -> the codec begins handing us empty input buffers via the callback
         codec = c                               // store the instance
+        sawConfig = false                       // we haven't fed the SPS yet; drop picture data until we do
         running = true                          // arm the feeder loop
 
         feeder = Thread({ feedLoop() }, "h264-feeder").apply { start() }   // spawn the feeder thread that submits NALs into the codec
@@ -130,8 +132,20 @@ class H264Decoder(                              // constructor params -> private
         var ptsUs = 0L                           // a fake, monotonically increasing presentation timestamp (microseconds)
         try {
             while (running) {                    // loop until stop()
-                // Block until we have both a NAL and a free input buffer.
+                // Block until we have a NAL.
                 val nal = pendingNals.take()     // BLOCK until a NAL is available (from submitNal)
+                val type = nalType(nal)          // the H.264 NAL unit type (7=SPS, 8=PPS, 5=IDR, 1=non-IDR, …)
+
+                // Connecting mid-stream, the first NALs are P-slices that reference frames
+                // we never saw. Feeding picture data to a codec that has no parameter sets
+                // yet faults it (UNKNOWN_ERROR) before the first keyframe arrives. So drop
+                // everything until the first SPS; the Linux side resends SPS/PPS before every
+                // keyframe (h264parse config-interval=-1), so the wait is at most one GOP.
+                if (!sawConfig) {                // not configured yet?
+                    if (type != 7) continue      // ignore anything that isn't an SPS
+                    sawConfig = true             // SPS in hand -> from here we feed the codec
+                }
+
                 val index = availableInputBuffers.take()   // BLOCK until the codec offers a free input buffer
 
                 val input = c.getInputBuffer(index) ?: continue   // get the actual ByteBuffer for that slot; skip if null
@@ -147,7 +161,7 @@ class H264Decoder(                              // constructor params -> private
                 }
                 input.put(nal)                   // copy the NAL bytes into the codec's input buffer
 
-                val flags = if (isParameterSet(nal)) {   // is this NAL an SPS/PPS header rather than picture data?
+                val flags = if (type == 7 || type == 8) {   // is this NAL an SPS/PPS header rather than picture data?
                     MediaCodec.BUFFER_FLAG_CODEC_CONFIG   // yes -> mark it as codec-config so the decoder configures itself from it
                 } else {
                     0                            // no -> normal frame data, no special flag
@@ -164,19 +178,18 @@ class H264Decoder(                              // constructor params -> private
         }
     }
 
-    /** True if this NAL unit is an SPS (7) or PPS (8) parameter set. */
-    private fun isParameterSet(nal: ByteArray): Boolean {
+    /** The H.264 NAL unit type (low 5 bits of the header byte), or -1 if unparseable. */
+    private fun nalType(nal: ByteArray): Int {
         // Skip the Annex-B start code to reach the NAL header byte.
         val headerIndex = when {                 // figure out how long the leading start code is, so we can find the NAL header byte after it
             nal.size >= 4 && nal[0].toInt() == 0 && nal[1].toInt() == 0 &&
                 nal[2].toInt() == 0 && nal[3].toInt() == 1 -> 4   // 4-byte start code 00 00 00 01 -> header is at index 4
             nal.size >= 3 && nal[0].toInt() == 0 && nal[1].toInt() == 0 &&
                 nal[2].toInt() == 1 -> 3                          // 3-byte start code 00 00 01 -> header is at index 3
-            else -> return false                 // no recognisable start code -> definitely not a parameter set
+            else -> return -1                    // no recognisable start code -> unknown
         }
-        if (headerIndex >= nal.size) return false   // guard: the NAL is just a start code with no header byte
-        val type = nal[headerIndex].toInt() and 0x1F   // the low 5 bits of the NAL header byte = the NAL unit type
-        return type == 7 || type == 8            // type 7 = SPS, type 8 = PPS -> these are the parameter sets
+        if (headerIndex >= nal.size) return -1   // guard: the NAL is just a start code with no header byte
+        return nal[headerIndex].toInt() and 0x1F // the low 5 bits of the NAL header byte = the NAL unit type (7=SPS, 8=PPS, …)
     }
 
     fun stop() {                                 // shut the decoder down cleanly

@@ -67,8 +67,14 @@ _ENCODER_CANDIDATES = [          # an ordered list of (element-name, pipeline-fr
      "preset=low-latency-hq zerolatency=true"),                                               # preset + zerolatency=true tell NVENC to drop its internal reordering buffer
 
     # Pure-software fallback. Works everywhere; higher CPU + latency.
+    # sliced-threads=false + threads=1 force ONE slice per frame. With tune=zerolatency
+    # x264 otherwise uses sliced-threading (one slice per CPU core), so each frame becomes
+    # ~N slice NALs. The Android client feeds NALs one-by-one with separate timestamps, so
+    # multi-slice frames arrive as bogus partial "frames" and the decoder faults. One slice
+    # per frame keeps frame == NAL, which the simple NAL-by-NAL feeder decodes correctly.
     ("x264enc",                                                                               # CPU-based H.264 encoder; always available with plugins-ugly
-     "x264enc tune=zerolatency speed-preset=ultrafast bitrate={kbps} key-int-max={gop}"),     # zerolatency disables look-ahead/B-frames; ultrafast trades quality for speed
+     "x264enc tune=zerolatency speed-preset=ultrafast bitrate={kbps} key-int-max={gop} "      # zerolatency disables look-ahead/B-frames; ultrafast trades quality for speed
+     "sliced-threads=false threads=1"),                                                       # one slice per frame: a frame is a single NAL (see note above)
 ]
 
 
@@ -120,8 +126,9 @@ def build_encode_tail():                   # returns the common downstream half 
         "videoconvert ! "                                      # convert whatever pixel format comes in into one the encoder accepts
         "videorate ! "                                         # duplicate/drop frames to hit a steady FPS (encoders dislike jittery input)
         "videoscale add-borders=true ! "                       # resize to the target size; add-borders=true letterboxes (black bars) instead of stretching
-        f"video/x-raw,width={WIDTH},height={HEIGHT},"          # a "capsfilter": force the exact output format after scaling...
-        f"framerate={FPS}/1,pixel-aspect-ratio=1/1 ! "         # ...locking resolution, framerate, and square pixels (1/1) so nothing distorts
+        f"video/x-raw,format=I420,width={WIDTH},height={HEIGHT},"  # a "capsfilter": force the exact output format after scaling...
+        f"framerate={FPS}/1,pixel-aspect-ratio=1/1 ! "         # ...format=I420 (4:2:0) is REQUIRED: without it x264enc negotiates 4:4:4 (profile High 4:4:4),
+                                                               # which Android hardware decoders can't decode (they fault on the SPS). Also locks res/fps/square pixels.
         f"{enc_fragment} ! "                                   # the chosen H.264 encoder fragment from pick_encoder()
         "h264parse config-interval=-1 ! "                      # tidy the encoder's output into proper H.264; -1 re-sends SPS/PPS headers before every keyframe
         "video/x-h264,stream-format=byte-stream,alignment=au ! "  # force Annex-B byte-stream (start-code delimited) and one access-unit per buffer
