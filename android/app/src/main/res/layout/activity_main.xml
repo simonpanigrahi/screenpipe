@@ -1,39 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  A SurfaceView fills the screen — MediaCodec decodes directly onto its Surface
-  (zero-copy, low latency). A TextView on top shows connection status until the
-  first frame arrives.
+  The screen has four stacked layers (FrameLayout draws later children on top):
+    1. SurfaceView   — the decoded video. Centered; its size is adjusted at
+                       runtime for aspect-fit (letterboxing) unless "Stretch" is on.
+    2. status        — the big centered "Waiting for stream…" message.
+    3. stats         — a small top-left overlay (resolution / state), toggleable.
+    4. controls      — a bottom control bar with the feature toggles. Hidden by
+                       default; tap anywhere to show it, and it auto-hides.
 
-  NOTE: the SurfaceView is match_parent, so the video is currently STRETCHED to
-  fill. Correct aspect-fit/letterboxing is Milestone 2.
-
-  (Attributes are explained in the comment block above each element, since XML
-  can't hold comments between attributes.)
+  (XML can't carry comments between attributes, so each element is explained in
+  the comment block directly above it.)
 -->
-<!-- FrameLayout: a simple container that STACKS its children on top of each
-     other (later children draw above earlier ones). Here: video on the bottom,
-     status text on top.
-       layout_width/height="match_parent" -> fill the whole screen.
-       background=black                    -> black behind any letterbox bars. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@android:color/black">
 
-    <!-- SurfaceView: the dedicated video surface the decoder renders onto.
-           id="@+id/surface" -> the id MainActivity looks up via findViewById.
-           width/height match_parent -> fills the FrameLayout (hence stretched for now). -->
+    <!-- SurfaceView: the dedicated video surface MediaCodec renders onto.
+           layout_gravity="center" -> stays centered when resized for aspect-fit. -->
     <SurfaceView
         android:id="@+id/surface"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="match_parent"
+        android:layout_gravity="center" />
 
-    <!-- TextView: the status overlay ("Waiting for stream…").
-           id="@+id/status"          -> looked up by MainActivity to update/hide it.
-           width/height wrap_content  -> only as big as its text.
-           layout_gravity="center"    -> centered within the FrameLayout.
-           text=...                   -> the initial message before connecting.
-           textColor=white / textSize=20sp -> visible on the black background. -->
+    <!-- status: the large centered connection message, shown until frames flow. -->
     <TextView
         android:id="@+id/status"
         android:layout_width="wrap_content"
@@ -42,4 +34,73 @@
         android:text="Waiting for stream…"
         android:textColor="@android:color/white"
         android:textSize="20sp" />
+
+    <!-- stats: small diagnostics overlay in the top-left corner.
+           visibility="gone" -> hidden until the "Stats" toggle turns it on.
+           background=translucent black -> readable over any video. -->
+    <TextView
+        android:id="@+id/stats"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="12dp"
+        android:padding="8dp"
+        android:background="#99000000"
+        android:textColor="#FF80FF80"
+        android:textSize="13sp"
+        android:fontFamily="monospace"
+        android:visibility="gone"
+        android:text="" />
+
+    <!-- controls: the bottom toggle bar.
+           visibility="gone" -> hidden until the user taps the screen.
+           background=translucent black -> a readable panel over the video.
+           The buttons inside are wired up and re-labelled in MainActivity. -->
+    <LinearLayout
+        android:id="@+id/controls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:background="#B3000000"
+        android:padding="8dp"
+        android:visibility="gone">
+
+        <Button
+            android:id="@+id/btnConnect"
+            style="?android:attr/buttonBarButtonStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="@android:color/white"
+            android:text="Disconnect" />
+
+        <Button
+            android:id="@+id/btnFit"
+            style="?android:attr/buttonBarButtonStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="@android:color/white"
+            android:text="Fit: On" />
+
+        <Button
+            android:id="@+id/btnStats"
+            style="?android:attr/buttonBarButtonStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="@android:color/white"
+            android:text="Stats: Off" />
+
+        <Button
+            android:id="@+id/btnAwake"
+            style="?android:attr/buttonBarButtonStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="@android:color/white"
+            android:text="Awake: On" />
+    </LinearLayout>
 </FrameLayout>

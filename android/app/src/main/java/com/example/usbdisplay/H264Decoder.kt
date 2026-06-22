@@ -28,7 +28,8 @@ import java.util.concurrent.LinkedBlockingQueue // a thread-safe FIFO queue used
  */
 class H264Decoder(                              // constructor params -> private fields:
     private val surface: Surface,               // where decoded frames are rendered (from the SurfaceView)
-    private val onStatus: (String) -> Unit       // callback to report status to the UI
+    private val onStatus: (String) -> Unit,      // callback to report status to the UI
+    private val onResolution: (Int, Int) -> Unit = { _, _ -> }   // callback with the real decoded width/height (for aspect-fit + stats)
 ) {
     companion object {                          // shared constants ("static")
         private const val TAG = "H264Decoder"   // logcat tag
@@ -81,6 +82,7 @@ class H264Decoder(                              // constructor params -> private
                 val w = format.getInteger(MediaFormat.KEY_WIDTH)    // actual decoded width
                 val h = format.getInteger(MediaFormat.KEY_HEIGHT)   // actual decoded height
                 Log.i(TAG, "decoding ${w}x$h")
+                onResolution(w, h)   // report the true dimensions so MainActivity can aspect-fit the surface + show stats
                 onStatus("") // clear the status overlay once frames flow   // empty string -> MainActivity hides the "Waiting…" label
             }
 
@@ -103,6 +105,24 @@ class H264Decoder(                              // constructor params -> private
     /** Called by the network thread for each NAL unit (includes the start code). */
     fun submitNal(nal: ByteArray) {             // StreamClient calls this for every complete NAL it parses
         if (running) pendingNals.offer(nal)     // if we're active, queue the NAL for the feeder (offer never blocks)
+    }
+
+    /**
+     * Retarget the running decoder to a new render Surface.
+     *
+     * A SurfaceView hands out a fresh/reallocated Surface whenever it is resized
+     * (e.g. our aspect-fit relayout once the real video size is known). If we keep
+     * rendering to the stale Surface, MediaCodec faults with UNKNOWN_ERROR. Calling
+     * setOutputSurface() while the codec is running is the supported way to follow
+     * the SurfaceView to its new Surface without tearing the decoder down.
+     */
+    fun setSurface(newSurface: Surface) {
+        if (!newSurface.isValid) return         // nothing to point at yet; ignore
+        try {
+            codec?.setOutputSurface(newSurface) // hot-swap the render target; keeps the decode pipeline alive
+        } catch (e: IllegalStateException) {    // codec not in a state that allows the swap (e.g. mid-teardown)
+            Log.w(TAG, "setOutputSurface failed", e)
+        }
     }
 
     private fun feedLoop() {                     // runs on the feeder thread: pull a NAL + a free buffer, submit to the codec
