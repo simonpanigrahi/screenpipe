@@ -39,11 +39,16 @@ class H264Decoder(                              // constructor params -> private
         // resolution the Linux side forces (1920x1200).
         private const val NOMINAL_WIDTH = 1920  // placeholder width used only until the real size arrives in the SPS
         private const val NOMINAL_HEIGHT = 1200 // placeholder height (same reason)
+        // Latency guard: at ~1 NAL per frame, this many queued NALs means we've fallen
+        // ~0.75 s behind live. Rather than render stale frames, we dump the backlog and
+        // resync at the next keyframe. Keeps the displayed image at "now".
+        private const val MAX_PENDING_NALS = 45
     }
 
     private var codec: MediaCodec? = null       // the actual decoder instance; null until start()
     @Volatile private var running = false       // on/off switch, read by the feeder thread (@Volatile = cross-thread safe)
-    private var sawConfig = false               // have we fed the decoder its first SPS yet? (gates picture data until configured)
+    @Volatile private var sawConfig = false     // have we fed the decoder its first SPS yet? (gates picture data until configured;
+                                                // @Volatile because the network thread can reset it on a backlog drop, see submitNal)
 
     private val pendingNals = LinkedBlockingQueue<ByteArray>()       // NALs waiting to be fed in (produced by StreamClient, consumed by the feeder)
     private val availableInputBuffers = LinkedBlockingQueue<Int>()   // indices of empty input buffers the codec gave us (produced by the codec callback)
@@ -106,7 +111,16 @@ class H264Decoder(                              // constructor params -> private
 
     /** Called by the network thread for each NAL unit (includes the start code). */
     fun submitNal(nal: ByteArray) {             // StreamClient calls this for every complete NAL it parses
-        if (running) pendingNals.offer(nal)     // if we're active, queue the NAL for the feeder (offer never blocks)
+        if (!running) return                    // not active -> ignore
+        if (pendingNals.size >= MAX_PENDING_NALS) {   // we're falling behind live (decode/render slower than arrival)...
+            // Drop the whole backlog and resync at the next keyframe. Feeding the stale frames
+            // would just render seconds-old content; skipping to the next SPS/keyframe (resent
+            // every GOP by the Linux side) snaps the display back to "now".
+            pendingNals.clear()                 // discard the stale frames
+            sawConfig = false                   // make the feeder wait for the next SPS before decoding again
+            Log.w(TAG, "input backlog >= $MAX_PENDING_NALS NALs — dropping to resync (latency guard)")
+        }
+        pendingNals.offer(nal)                  // queue this NAL for the feeder (offer never blocks)
     }
 
     /**

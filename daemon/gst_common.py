@@ -30,8 +30,11 @@ from gi.repository import Gst, GLib        # noqa: E402  -> Gst = GStreamer; GLi
 WIDTH = 1920          # the width, in pixels, every frame is scaled to before encoding (1920x1200 = high-quality 16:10)
 HEIGHT = 1200         # the height, in pixels, every frame is scaled to before encoding
 FPS = 60              # target frames per second the pipeline retimes to
-BITRATE_KBPS = 40000  # encoder target bitrate in kbit/sec (40000 = 40 Mbps); bitrate is NOT the latency lever, so keep it high for crisp text
-GOP = FPS             # "group of pictures" = frames between keyframes; =FPS means one keyframe per second -> fast reconnect recovery
+BITRATE_KBPS = 15000  # encoder target bitrate in kbit/sec (15 Mbps). Still crisp at 1920x1200 for desktop content,
+                      # but small enough that the adb-over-USB tunnel drains every frame in real time and keyframes
+                      # don't cause ~1 MB spikes. The real latency lever is bounded buffers (see build_encode_tail).
+GOP = FPS // 2        # keyframe every 0.5 s. Frequent keyframes make "resync to latest keyframe" (the low-latency
+                      # recovery used by the sink and the Android client) snap back quickly after any drop/reconnect.
 PORT = 5000           # TCP port the encoded stream is served on; the Android app reaches it via `adb reverse tcp:5000 tcp:5000`
 
 
@@ -123,6 +126,10 @@ def build_encode_tail():                   # returns the common downstream half 
     print(f"[gst] using H.264 encoder: {enc_name}")            # log it so you can SEE whether you got hardware or the software fallback
 
     return (                                                   # build the pipeline string piece by piece; " ! " is GStreamer's "link these elements" operator
+        # INPUT leaky queue: if anything downstream (encode/scale) ever falls behind, DROP the
+        # oldest RAW frames here instead of letting capture-side latency accumulate. This bounds
+        # glass-to-glass latency to ~"the newest frame" regardless of momentary encoder stalls.
+        "queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 leaky=downstream ! "
         "videoconvert ! "                                      # convert whatever pixel format comes in into one the encoder accepts
         "videorate ! "                                         # duplicate/drop frames to hit a steady FPS (encoders dislike jittery input)
         "videoscale add-borders=true ! "                       # resize to the target size; add-borders=true letterboxes (black bars) instead of stretching
@@ -133,7 +140,15 @@ def build_encode_tail():                   # returns the common downstream half 
         "h264parse config-interval=-1 ! "                      # tidy the encoder's output into proper H.264; -1 re-sends SPS/PPS headers before every keyframe
         "video/x-h264,stream-format=byte-stream,alignment=au ! "  # force Annex-B byte-stream (start-code delimited) and one access-unit per buffer
         "queue max-size-buffers=1 leaky=downstream ! "         # a 1-frame buffer that DROPS stale frames (leaky=downstream) -> never accumulate latency
-        f"tcpserversink host=0.0.0.0 port={PORT} sync=false"   # serve the bytes over TCP on all interfaces; sync=false = push frames out immediately, no clock wait
+        # OUTPUT sink. The defaults buffer per-client WITHOUT LIMIT (buffers-max=-1): a tablet that
+        # drains even slightly slow would accumulate seconds of frames that never recover -> the lag
+        # you saw. These options keep every client LIVE:
+        #   sync=false              -> push frames immediately, no clock wait
+        #   sync-method=latest-keyframe -> a new client starts at the most recent keyframe, not a backlog
+        #   buffers-soft-max=30     -> if a client falls >~0.5s behind...
+        #   recover-policy=keyframe -> ...drop it forward to the most recent keyframe (skip the backlog)
+        f"tcpserversink host=0.0.0.0 port={PORT} sync=false "
+        "sync-method=latest-keyframe recover-policy=keyframe buffers-soft-max=30"
     )
 
 

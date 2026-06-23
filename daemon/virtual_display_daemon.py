@@ -52,6 +52,8 @@ _screencast = None                         # proxy to org.gnome.Mutter.ScreenCas
 _session = None                            # proxy to the screen-cast session we create
 _stream = None                             # proxy to the virtual-monitor stream within that session
 _pipeline = None                           # the GStreamer pipeline (created later, once we have a PipeWire node id)
+_recovering = False                        # guard so overlapping errors don't stack multiple recovery attempts
+_retry_delay = 1                           # seconds to wait before recreating the monitor; backs off on repeated failure (reset on success)
 
 
 def _start_gstreamer(node_id, loop):       # called once mutter hands us a PipeWire node to capture from
@@ -73,13 +75,13 @@ def _start_gstreamer(node_id, loop):       # called once mutter hands us a PipeW
 
     def on_bus_message(_bus_obj, message):                  # handle messages this pipeline posts (errors / end-of-stream)
         t = message.type                                    # the message kind
-        if t == Gst.MessageType.ERROR:                      # fatal error
+        if t == Gst.MessageType.ERROR:                      # pipeline error -> usually the PipeWire node went away ("target not found")
             err, debug = message.parse_error()              # unpack readable message + verbose debug
             print(f"[gst] ERROR: {err.message}\n[gst] debug: {debug}")
-            loop.quit()                                     # stop the main loop -> daemon exits
-        elif t == Gst.MessageType.EOS:                      # end-of-stream
+            _schedule_recovery(loop)                        # recreate the virtual monitor instead of exiting
+        elif t == Gst.MessageType.EOS:                      # end-of-stream -> the capture ended; treat like a drop and rebuild
             print("[gst] end-of-stream")
-            loop.quit()
+            _schedule_recovery(loop)
         return True                                         # stay subscribed to future messages
 
     bus = _pipeline.get_bus()                               # the pipeline's message channel
@@ -87,9 +89,54 @@ def _start_gstreamer(node_id, loop):       # called once mutter hands us a PipeW
     bus.connect("message", on_bus_message)                  # route every message to the handler above
 
     _pipeline.set_state(Gst.State.PLAYING)                  # START capturing/encoding/serving
+    global _retry_delay                                     # streaming actually started...
+    _retry_delay = 1                                        # ...so reset the recovery backoff to its baseline
     print(f"[gst] PLAYING — TCP server on port {gst_common.PORT}.")
     print("[daemon] A new extended display is now active. Drag a window onto it; "
           "it appears on the tablet. Ctrl-C to stop.")
+
+
+def _teardown(stop_session):               # release the pipeline (and optionally the screen-cast session) before rebuilding
+    """Tear down the GStreamer pipeline and, if asked, the mutter session."""
+    global _pipeline, _session, _stream
+    if _pipeline is not None:                              # if a pipeline exists...
+        try:
+            _pipeline.set_state(Gst.State.NULL)            # ...stop it and FREE the encoder + release TCP port 5000
+        except Exception:                                  # noqa: BLE001
+            pass
+        _pipeline = None
+    if stop_session:                                       # on a node drop the old session is dead; close it so mutter cleans up
+        try:
+            if _session is not None:
+                _session.Stop()                            # removes the (now-defunct) virtual monitor
+        except Exception:                                  # noqa: BLE001 — it may already be gone
+            pass
+        _session = None
+        _stream = None
+
+
+def _schedule_recovery(loop):              # called from the bus handler when the stream drops; rebuilds after a short delay
+    """Tear the dead stream down and schedule recreation of the virtual monitor."""
+    global _recovering
+    if _recovering:                                        # a recovery is already pending -> don't stack another
+        return
+    _recovering = True
+    _teardown(stop_session=True)                           # drop the dead pipeline + session (frees port 5000 before we rebind it)
+    print(f"[daemon] virtual display lost — recreating in {_retry_delay}s…")
+    GLib.timeout_add_seconds(_retry_delay, _recover, loop) # run _recover once after the backoff delay (on the main loop)
+
+
+def _recover(loop):                        # the actual rebuild, run from a GLib timeout (so it's on the main thread)
+    """Recreate the virtual monitor; on failure, back off and try again."""
+    global _recovering, _retry_delay
+    _recovering = False                                    # this attempt is now running; allow a future one to be scheduled
+    try:
+        _setup_virtual_monitor(loop)                       # fresh session + RecordVirtual + Start -> fires PipeWireStreamAdded -> _start_gstreamer
+    except Exception as exc:                               # noqa: BLE001 — D-Bus/mutter may be momentarily unavailable
+        _retry_delay = min(_retry_delay * 2, 5)            # exponential backoff, capped at 5s, so we don't spin
+        print(f"[daemon] recovery failed: {exc}; retrying in {_retry_delay}s")
+        _schedule_recovery(loop)                           # try again later
+    return False                                           # False -> this is a one-shot timeout, don't repeat
 
 
 def _on_pipewire_stream_added(node_id, loop):               # D-Bus signal handler: fires when mutter finishes building the virtual monitor
