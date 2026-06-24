@@ -36,6 +36,18 @@ sudo apt install -y \
 If no hardware encoder is found, the scripts fall back to **software** `x264enc`
 (`gstreamer1.0-plugins-ugly`) — it works but adds CPU load and latency.
 
+### Python D-Bus binding (`pydbus`)
+
+`virtual_display_daemon.py` needs `pydbus`. The apt package is `python3-pydbus`
+(in the list above). If apt isn't available or you prefer pip:
+
+```bash
+python3 -m pip install --user --break-system-packages pydbus
+```
+
+(`--break-system-packages` is required on Ubuntu 24.04's externally-managed
+Python; it installs into `~/.local`, not the system site-packages.)
+
 ## 2. Check your session is Wayland + GNOME
 
 ```bash

@@ -20,7 +20,13 @@ screen and the tablet in a single frame; read the millisecond stopwatch delta.
 |--------|--------|
 | Frame rate | ≥ 60 fps |
 | Minimum resolution | ≥ 1920 × 1200 |
-| Bitrate range | 30 – 60 Mbps |
+| Bitrate | 15 Mbps (CBR) over USB |
+
+> **Bitrate note:** an earlier draft targeted 30–60 Mbps. In practice 15 Mbps CBR
+> is crisp for desktop content at 1920×1200 and is the *better* latency choice:
+> fatter keyframes (~1 MB) spike the USB transfer and the encoder, so a leaner
+> stream drains every frame in real time. Latency is controlled by bounded
+> buffers + drop-to-live, not by bitrate (see `ARCHITECTURE.md`).
 
 ## Transport
 
